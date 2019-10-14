@@ -1,5 +1,6 @@
 #include<iostream>
 #include<vector>
+#include<unordered_map>
 #include<sys/socket.h>
 #include<sys/types.h>
 #include<netinet/in.h>
@@ -14,6 +15,48 @@ using namespace std;
 
 int tracker;
 char *trackerfile;
+
+unordered_map<string, string> files;
+
+void *fileshare(void *com_socket)
+{
+	int socket = *(int *) com_socket;
+	char msg[256];
+	recv(socket, msg, strlen(msg), 0);
+	string commmand(msg);
+	stringstream ss(commmand);
+	vector<string> arg;
+	string temp;
+	while(ss >> temp)
+ 		arg.push_back(temp);
+
+ 	if(arg[0] == "get_chunk_details")
+ 	{
+ 		strcpy(msg, files[arg[1]].c_str());
+		send(socket, msg, strlen(msg), 0);
+ 	}
+ 	if(arg[0] == "download")
+ 	{
+		int total;
+		char ack[8];
+		int chnk_no;
+		char buf[51200];
+		recv(socket, &total, sizeof(int), 0);
+		FILE *fp = fopen(arg[1].c_str(),"rb+"); 		
+ 		for(int i = 0; i < total; i++)
+ 		{
+ 			recv(socket, &chnk_no, sizeof(int), 0);
+ 			int st = chnk_no * 51200;
+ 			fseek(fp, st, SEEK_SET);
+ 			bzero(buf, 51200);
+ 			int ln = fread(buf, sizeof(char), sizeof(buf), fp);
+ 			//send(socket, &ln, sizeof(int), 0);
+ 			send(socket, buf, ln, 0);
+ 			bzero(ack, 8);
+ 			recv(socket, ack, 4, 0);
+ 		}
+ 	}
+}
 
 void *server(void *p)
 {
@@ -38,18 +81,19 @@ void *server(void *p)
 
 	listen(s_socket, 10);
 
-	int i=0;
-	int com_socket[100];
 	while(true)
 	{
 		struct sockaddr_in client_add;
 		socklen_t len = sizeof(client_add);
-			com_socket[i] = accept(s_socket, (struct sockaddr *)&client_add, &len);
+		
+		int *com_socket = new int[1]; 
+		*com_socket = accept(s_socket, (struct sockaddr *)&client_add, &len);
 
 		if(com_socket < 0)
 			cout << "Error while accept!" << endl;
 
-		i = (i + 1) % 100;
+		pthread_t request_handler;
+		pthread_create(&request_handler, NULL, fileshare, com_socket);
 	}
 
 	close(s_socket);
@@ -377,5 +421,6 @@ int main(int argc, char const *argv[])
 			cout << "Invalid commmand!" << endl;
  	}
 
+	pthread_exit(NULL);
 	return 0;
 }

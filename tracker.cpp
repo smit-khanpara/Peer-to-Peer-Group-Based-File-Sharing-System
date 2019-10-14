@@ -20,6 +20,8 @@ struct userInfo
 	string passwd;
 	string ip;
 	string port;
+	vector<string> gr;
+	vector<string> fl;
 };
 
 struct groupInfo
@@ -32,18 +34,17 @@ struct groupInfo
 
 struct fileInfo
 {
-	string name;
-	string path;
-	string hash;
 	string size;
 	vector<string> groups;
 	vector<string> owners;
+	vector<string> paths;
 };
 
 unordered_map<string, struct fileInfo*> files;
 unordered_map<string, struct userInfo*> users;
 unordered_map<string, int> login_status;
 unordered_map<string, struct groupInfo*> groups;
+unordered_map<string, string> filemap;
 
 void my_handler(int signum)
 {
@@ -58,7 +59,7 @@ void create_user(vector<string> arg, int socket)
 	if(users.find(arg[1]) != users.end())
 	{
 		strcpy(msg, "User already exist!");
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 		return;
 	}
 
@@ -68,7 +69,7 @@ void create_user(vector<string> arg, int socket)
 	new_user->port = arg[4];
 	users[arg[1]] = new_user;
 	strcpy(msg, "Account successfully created!");
-	send(socket, msg, sizeof(msg), 0);
+	send(socket, msg, strlen(msg), 0);
 }
 
 pair<string,int> login(vector<string> arg, int socket)
@@ -79,7 +80,7 @@ pair<string,int> login(vector<string> arg, int socket)
 	if(users.find(arg[1]) == users.end())
 	{
 		strcpy(msg, "User doesn't exist!");
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 		temp.first = "no";
 		temp.second = 0;
 		return temp;
@@ -90,14 +91,14 @@ pair<string,int> login(vector<string> arg, int socket)
 		if(login_status[arg[1]])
 		{
 			strcpy(msg, "User already logged in.");
-			send(socket, msg, sizeof(msg), 0);
+			send(socket, msg, strlen(msg), 0);
 			temp.first = "no";
 			temp.second = 0;
 		}	
 		else
 		{
 			strcpy(msg, "Successfully logged in");
-			send(socket, msg, sizeof(msg), 0);
+			send(socket, msg, strlen(msg), 0);
 			login_status[arg[1]] = 1;
 			temp.first = arg[1];
 			temp.second = 1;
@@ -106,7 +107,7 @@ pair<string,int> login(vector<string> arg, int socket)
 	else
 	{
 		strcpy(msg, "Invalid login credentials!");
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 		temp.first = "no";
 		temp.second = 0;
 	}
@@ -119,7 +120,7 @@ void create_group(vector<string> arg, string cu, int socket)
 	if(groups.find(arg[1]) != groups.end())
 	{
 		strcpy(msg, "Group already exist!");
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 	}
 	else
 	{
@@ -128,8 +129,12 @@ void create_group(vector<string> arg, string cu, int socket)
 		new_group->owner = cu;
 		new_group->members.push_back(cu);
 		groups[arg[1]] = new_group;
+
+
+		struct userInfo *u = users[cu];
+		u->gr.push_back(arg[1]);
 		strcpy(msg, "Group successfully created.");
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 	}
 }
 
@@ -140,47 +145,35 @@ void join_group(vector<string> arg, string cu, int socket)
 	{
 		int flag = 0;
 		struct groupInfo *temp = groups[arg[1]];
-		for(int i=0; i<temp->members.size(); i++)
-		{
-			if(temp->members[i] == cu)
-			{
-				flag = 1;
-				break;
-			}
-		}
+		for(int i=0; i<temp->members.size(); i++)  if(temp->members[i] == cu) { flag = 1; break; }
+		
 		if(flag)
 		{
 			strcpy(msg, "You are already member of this group.");
-			send(socket, msg, sizeof(msg), 0);
+			send(socket, msg, strlen(msg), 0);
 		}
 		else
 		{
 			flag = 0;
-			for(int i=0; i<temp->join_requests.size(); i++)
-			{
-				if(temp->join_requests[i] == cu)
-				{
-					flag = 1;
-					break;
-				}
-			}
+			for(int i=0; i<temp->join_requests.size(); i++) if(temp->join_requests[i] == cu) { flag = 1; break; }
+
 			if(flag)
 			{
 				strcpy(msg, "Your request is already in queue.");
-				send(socket, msg, sizeof(msg), 0);
+				send(socket, msg, strlen(msg), 0);
 			}
 			else
 			{
 				groups[arg[1]]->join_requests.push_back(cu);
 				strcpy(msg, "Group join request successfully sent.");
-				send(socket, msg, sizeof(msg), 0);
+				send(socket, msg, strlen(msg), 0);
 			}
 		}
 	}
 	else
 	{
 		strcpy(msg, "Group doesn't exist!");
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 	}
 }
 
@@ -191,31 +184,62 @@ void leave_group(vector<string> arg, string cu, int socket)
 	{
 		int flag = -1;
 		struct groupInfo *temp = groups[arg[1]];
-		for(int i=0; i<temp->members.size(); i++)
-		{
-			if(temp->members[i] == cu)
-			{
-				flag = i;
-				break;
-			}
-		}
+		for(int i=0; i<temp->members.size(); i++) if(temp->members[i] == cu) { flag = i; break; }
 		if(flag >= 0)
 		{
+			for(auto f : users[cu]->fl)
+			{
+				struct fileInfo *fi = files[filemap[f]];
+				if(fi->owners.size() == 1)
+				{
+					filemap.erase(f);
+					files.erase(filemap[f]);
+					free(fi);	
+				}
+				else
+				{
+					for(int i = 0; i < fi->owners.size(); i++)
+					{
+						if(fi->owners[i] == cu && fi->groups[i] == arg[1])
+						{
+							fi->owners.erase(fi->owners.begin() + i);
+							fi->groups.erase(fi->groups.begin() + i);
+							fi->paths.erase(fi->paths.begin() + i);
+
+							int cnt = 0;
+							for(int j = 0; j < fi->owners.size(); j++)
+							{
+								int k;
+								for(k = fi->paths[j].size() - 1; k >= 0; i--)  if(fi->paths[j][k] == '/')  break;
+								string temp = fi->paths[j].substr(k+1);
+								if(temp == f)
+								{
+									cnt = 1;
+									break;
+								}			
+							}
+							if(!cnt)
+								filemap.erase(f);
+						}	
+					}
+				}
+			}
+
 			temp->members.erase(temp->members.begin() + flag);
 			strcpy(msg, "You have leaved group ");
 			strcpy(msg, arg[1].c_str());
-			send(socket, msg, sizeof(msg), 0);
+			send(socket, msg, strlen(msg), 0);
 		}
 		else
 		{
 			strcpy(msg, "You are not member of the group.");
-			send(socket, msg, sizeof(msg), 0);
+			send(socket, msg, strlen(msg), 0);
 		}
 	}
 	else
 	{
 		strcpy(msg, "Group doesn't exist!");
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 	}
 }
 
@@ -233,26 +257,26 @@ void list_requests(vector<string> arg, string cu, int socket)
 			for(int i=0; i<size; i++)
 			{
 				strcpy(msg, temp->join_requests[i].c_str());
-				send(socket, msg, sizeof(msg), 0);
+				send(socket, msg, strlen(msg), 0);
 			}
 			if(size == 0)
 			{
 				strcpy(msg, "There is no pending requests.");
-				send(socket, msg, sizeof(msg), 0);
+				send(socket, msg, strlen(msg), 0);
 			}
 		}
 		else
 		{
 			send(socket, &size, sizeof(int), 0);
 			strcpy(msg, "Only group owner can list requests.");
-			send(socket, msg, sizeof(msg), 0);
+			send(socket, msg, strlen(msg), 0);
 		}
 	}
 	else
 	{
 		send(socket, &size, sizeof(int), 0);
 		strcpy(msg, "Group doesn't exist!");
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 	}
 }
 
@@ -265,37 +289,33 @@ void accept_request(vector<string> arg, string cu, int socket)
 		struct groupInfo *temp = groups[arg[1]];
 		if(temp->owner == cu)
 		{
-			for(int i=0; i<temp->join_requests.size(); i++)
-			{
-				if(temp->join_requests[i] == arg[2])
-				{
-					flag = i;
-					break;
-				}
-			}
+			for(int i=0; i<temp->join_requests.size(); i++)  if(temp->join_requests[i] == arg[2]) { flag = i; break; }
+
 			if(flag >= 0)
 			{
 				temp->join_requests.erase(temp->join_requests.begin() + flag);
 				temp->members.push_back(arg[2]);
+				struct userInfo *u = users[arg[2]];
+				u->gr.push_back(arg[1]);
 				strcpy(msg, "Join request accepted.");
-				send(socket, msg, sizeof(msg), 0);
+				send(socket, msg, strlen(msg), 0);
 			}
 			else
 			{
 				strcpy(msg, "No such join request found!");
-				send(socket, msg, sizeof(msg), 0);
+				send(socket, msg, strlen(msg), 0);
 			}
 		}
 		else
 		{
 			strcpy(msg, "Only group owner can accept join request.");
-			send(socket, msg, sizeof(msg), 0);
+			send(socket, msg, strlen(msg), 0);
 		}
 	}
 	else
 	{
 		strcpy(msg, "Group doesn't exist!");
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 	}
 }
 
@@ -308,12 +328,12 @@ void list_groups(int socket)
 	for(auto i : groups)
 	{
 		strcpy(msg, i.first.c_str());
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 	}
 	if(size == 0)
 	{
 		strcpy(msg, "No group exist!");
-		send(socket, msg, sizeof(msg), 0);
+		send(socket, msg, strlen(msg), 0);
 	}
 }
 
@@ -322,12 +342,186 @@ int logout(string cu, int socket)
 	char msg[512];
 	login_status[cu] = 0;
 	strcpy(msg, "successfully logged out.");
-	send(socket, msg, sizeof(msg), 0);
+	send(socket, msg, strlen(msg), 0);
 	return 0;
 }
 
 void upload_file(vector<string> arg, string cu, int socket)
 {
+	//upload_file <filepath> <groupId> <hash> <size>
+	char msg[512];
+	if(groups.find(arg[2]) != groups.end())
+	{
+		int flag = 0;
+		struct userInfo *u = users[cu];
+		for(int i=0; i<u->gr.size(); i++)  if(arg[2] == u->gr[i]) {  flag = 1; break; }
+
+		if(flag)
+		{
+			int i;
+			for(i = arg[1].size() - 1; i >= 0; i--)  if(arg[1][i] == '/')  break;
+			string temp = arg[1].substr(i+1);
+			if(files.find(arg[3]) == files.end())
+			{
+				struct fileInfo *f = (struct fileInfo*) malloc(sizeof(struct fileInfo));
+				f->size = arg[4];
+				f->owners.push_back(cu);
+				f->groups.push_back(arg[2]);
+				f->paths.push_back(arg[1]);
+				files[arg[3]] = f;
+				users[cu]->fl.push_back(temp);
+				filemap[temp] = arg[3];
+				strcpy(msg, "File successfully uploaded.");
+				send(socket, msg, strlen(msg), 0);
+			}
+			else
+			{
+				if(filemap.find(temp) == filemap.end())
+				{
+					filemap[temp] = arg[3];
+					struct fileInfo *f = files[arg[3]];
+					f->owners.push_back(cu);
+					f->groups.push_back(arg[2]);
+					f->paths.push_back(arg[1]);
+					users[cu]->fl.push_back(temp);
+					strcpy(msg, "File successfully uploaded.");
+					send(socket, msg, strlen(msg), 0);
+				}
+				else
+				{
+					int flag = 0;
+					struct fileInfo *f = files[arg[3]];
+					for(int i=0; i<f->paths.size(); i++)  if(arg[1] == f->paths[i] && f->owners[i] == cu) {  flag = i; break; }
+					if(flag)
+					{
+						strcpy(msg, "File already exist!");
+						send(socket, msg, strlen(msg), 0);
+					}
+					else
+					{
+						f->owners.push_back(cu);
+						f->groups.push_back(arg[2]);
+						f->paths.push_back(arg[1]);
+						strcpy(msg, "File successfully uploaded.");
+						send(socket, msg, strlen(msg), 0);
+					}
+				}
+			}	
+		}
+		else
+		{
+			strcpy(msg, "You are not part of this group!");
+			send(socket, msg, strlen(msg), 0);
+		}
+	}
+	else
+	{
+		strcpy(msg, "Group doesn't exist!");
+		send(socket, msg, strlen(msg), 0);
+	}
+}
+
+void list_files(vector<string> arg, int socket)
+{
+	char msg[512];
+	if(groups.find(arg[1]) != groups.end())
+	{
+		if(filemap.size())
+		{
+			int cnt = 0;
+			for(auto i : filemap)
+			{
+				int flag = 0;
+				struct fileInfo *f = files[i.second];
+				strcpy(msg, i.first.c_str());
+				strcat(msg, " ");
+				for(int j = 0; j < f->groups.size(); j++)
+				{
+					if(f->groups[j] == arg[1])
+					{
+						strcat(msg, f->owners[j].c_str());
+						strcat(msg, " ");
+						flag++;
+					}
+				}
+				if(flag)
+				{
+					cnt++;
+					send(socket, msg, strlen(msg), 0);
+				}
+			}
+			if(cnt)
+			{
+				strcpy(msg, "complete");
+				send(socket, msg, strlen(msg), 0);
+			}
+			else
+			{
+				strcpy(msg, "No files exist!");
+				send(socket, msg, strlen(msg), 0);
+			}
+		}
+		else
+		{
+			strcpy(msg, "No files exist!");
+			send(socket, msg, strlen(msg), 0);
+		}
+	}
+	else
+	{
+		strcpy(msg, "Group doesn't exist!");
+		send(socket, msg, strlen(msg), 0);
+	}	
+}
+
+void download_file(vector<string> arg, string cu, int socket)
+{
+	// download_file​ <group_id> <file_name> <destination_path>
+	char msg[512];
+	if(groups.find(arg[1]) != groups.end())
+	{
+		if(filemap.find(arg[2]) != filemap.end())
+		{
+			int flag = 0;
+			struct userInfo *u = users[cu];
+			for(int i=0; i<u->gr.size(); i++)  if(arg[1] == u->gr[i]) {  flag = 1; break; }
+
+			if(flag)
+			{
+				string temp;
+				struct fileInfo *f = files[filemap[arg[2]]];
+				temp = f->size + "/";
+				strcpy(msg, temp.c_str());
+				send(socket, msg, strlen(msg), 0);
+				for(int i = 0; i < f->owners.size(); i++)
+				{
+					if(arg[1] == f->groups[i])
+					{
+						temp = f->owners[i] + "/" + users[f->owners[i]]->port + "/" + users[f->owners[i]]->ip + "/" + f->paths[i];
+						strcpy(msg, temp.c_str());
+						send(socket, msg, strlen(msg), 0);
+					}
+				}
+				strcpy(msg, "done");
+				send(socket, msg, strlen(msg), 0);
+			}
+			else
+			{
+				strcpy(msg, "You are not part of this group!");
+				send(socket, msg, strlen(msg), 0);
+			}
+		}
+		else
+		{
+			strcpy(msg, "File doesn't exist!");
+			send(socket, msg, strlen(msg), 0);
+		}
+	}
+	else
+	{
+		strcpy(msg, "Group doesn't exist!");
+		send(socket, msg, strlen(msg), 0);
+	}
 
 }
 
@@ -340,7 +534,7 @@ void *request_handler(void *com_socket)
 	while(true)
 	{
 		char msg[512];
-		recv(socket, msg, sizeof(msg), 0);
+		recv(socket, msg, strlen(msg), 0);
 		string commmand(msg);
 		stringstream ss(commmand);
  		vector<string> arg;
@@ -353,7 +547,7 @@ void *request_handler(void *com_socket)
 			if(arg.size() != 5)
 			{
 				strcpy(msg, "usage: create_user​ <user_id> <passwd>");
-				send(socket, msg, sizeof(msg), 0);
+				send(socket, msg, strlen(msg), 0);
 			}
 			else
 				create_user(arg, socket);
@@ -366,7 +560,7 @@ void *request_handler(void *com_socket)
 			if(arg.size() != 3)
 			{
 				strcpy(msg, "usage: login <user_id> <passwd>");
-				send(socket, msg, sizeof(msg), 0);
+				send(socket, msg, strlen(msg), 0);
 			}
 			else
 				temp = login(arg, socket);
@@ -383,7 +577,7 @@ void *request_handler(void *com_socket)
 				if(arg.size() != 2)
 				{
 					strcpy(msg, "uasge: create_group​ <group_id>");
-					send(socket, msg, sizeof(msg), 0);
+					send(socket, msg, strlen(msg), 0);
 				}
 				else
 					create_group(arg, curr_user, socket);
@@ -393,7 +587,7 @@ void *request_handler(void *com_socket)
 				if(arg.size() != 2)
 				{
 					strcpy(msg, "usage: join_group​ <group_id>");
-					send(socket, msg, sizeof(msg), 0);
+					send(socket, msg, strlen(msg), 0);
 				}
 				else
 					join_group(arg, curr_user, socket);
@@ -403,7 +597,7 @@ void *request_handler(void *com_socket)
 				if(arg.size() != 2)
 				{
 					strcpy(msg, "usage: leave_group​ <group_id>");
-					send(socket, msg, sizeof(msg), 0);
+					send(socket, msg, strlen(msg), 0);
 				}
 				else
 					leave_group(arg, curr_user, socket);
@@ -413,7 +607,7 @@ void *request_handler(void *com_socket)
 				if(arg.size() != 2)
 				{
 					strcpy(msg, "usage: list_requests <group_id>");
-					send(socket, msg, sizeof(msg), 0);
+					send(socket, msg, strlen(msg), 0);
 				}
 				else
 					list_requests(arg, curr_user, socket);
@@ -423,7 +617,7 @@ void *request_handler(void *com_socket)
 				if(arg.size() != 3)
 				{
 					strcpy(msg, "usage: accept_request​ <group_id> <user_id>");
-					send(socket, msg, sizeof(msg), 0);
+					send(socket, msg, strlen(msg), 0);
 				}
 				else
 					accept_request(arg, curr_user, socket);
@@ -433,41 +627,47 @@ void *request_handler(void *com_socket)
 				if(arg.size() != 1)
 				{
 					strcpy(msg, "usage: list_groups");
-					send(socket, msg, sizeof(msg), 0);
+					send(socket, msg, strlen(msg), 0);
 				}
 				else
 					list_groups(socket);
 			}
-			// else if(arg[0] == "list_files")
-			// {	
-			// 	if(arg.size() != 2)
-			// 		cout << "usage: list_files​ <group_id>" << endl;
-			// 	else
-			// 		list_files(commmand);
-			// }
+			else if(arg[0] == "list_files")
+			{	
+				if(arg.size() != 2)
+				{
+					strcpy(msg, "usage: list_files​ <group_id>");
+					send(socket, msg, strlen(msg), 0);
+				}
+				else
+					list_files(arg, socket);
+			}
 			else if(arg[0] == "upload_file")
 			{	
 				if(arg.size() != 5)
 				{
 					strcpy(msg, "usage: upload_file​ <file_path> <group_id>");
-					send(socket, msg, sizeof(msg), 0);
+					send(socket, msg, strlen(msg), 0);
 				}
 				else
 					upload_file(arg, curr_user, socket);
 			}
-			// else if(arg[0] == "download_file")
-			// {	
-			// 	if(arg.size() != 4)
-			// 		cout << "usage: download_file​ <group_id> <file_name> <destination_path>" << endl;
-			// 	else
-			// 		download_file(commmand);
-			// }
+			else if(arg[0] == "download_file")
+			{	
+				if(arg.size() != 4)
+				{
+					strcpy(msg, "usage: download_file​ <group_id> <file_name> <destination_path>");
+					send(socket, msg, strlen(msg), 0);
+				}
+				else
+					download_file(arg, curr_user, socket);
+			}
 			else if(arg[0] == "logout")
 			{	
 				if(arg.size() != 1)
 				{
 					strcpy(msg, "usage: logout");
-					send(socket, msg, sizeof(msg), 0);
+					send(socket, msg, strlen(msg), 0);
 				}
 				else
 					logged = logout(curr_user, socket);
@@ -492,7 +692,7 @@ void *request_handler(void *com_socket)
 		else
 		{
 			strcpy(msg, "Please login. If you don't have account? register.");
-			send(socket, msg, sizeof(msg), 0);
+			send(socket, msg, strlen(msg), 0);
 		}
 
 	}
