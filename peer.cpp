@@ -11,18 +11,33 @@
 #include<netdb.h>
 #include<stdio.h>
 #include <pthread.h> 
+#include<algorithm>
+#include <openssl/sha.h>
 using namespace std;
 
 int tracker;
 char *trackerfile;
+
+struct trdarg
+{
+	string name;
+	int port;
+	string ip;
+	string path;
+	vector<int> chunks;
+	string dpath;
+	string hash;
+	int cc;
+};
 
 unordered_map<string, string> files;
 
 void *fileshare(void *com_socket)
 {
 	int socket = *(int *) com_socket;
-	char msg[256];
-	recv(socket, msg, strlen(msg), 0);
+	char msg[51200];
+	bzero(msg, 51200);
+	recv(socket, msg, sizeof(msg), 0);
 	string commmand(msg);
 	stringstream ss(commmand);
 	vector<string> arg;
@@ -37,24 +52,16 @@ void *fileshare(void *com_socket)
  	}
  	if(arg[0] == "download")
  	{
-		int total;
-		char ack[8];
 		int chnk_no;
 		char buf[51200];
-		recv(socket, &total, sizeof(int), 0);
-		FILE *fp = fopen(arg[1].c_str(),"rb+"); 		
- 		for(int i = 0; i < total; i++)
- 		{
- 			recv(socket, &chnk_no, sizeof(int), 0);
- 			int st = chnk_no * 51200;
- 			fseek(fp, st, SEEK_SET);
- 			bzero(buf, 51200);
- 			int ln = fread(buf, sizeof(char), sizeof(buf), fp);
- 			//send(socket, &ln, sizeof(int), 0);
- 			send(socket, buf, ln, 0);
- 			bzero(ack, 8);
- 			recv(socket, ack, 4, 0);
- 		}
+		FILE *fp = fopen(arg[1].c_str(),"rb+");		
+		recv(socket, &chnk_no, sizeof(int), 0);
+		int st = chnk_no * 51200;
+		fseek(fp, st, SEEK_SET);
+		bzero(buf, 51200);
+		int ln = fread(buf, sizeof(char), sizeof(buf), fp);
+		send(socket, buf, ln, 0);
+		fclose(fp);
  	}
 }
 
@@ -80,24 +87,24 @@ void *server(void *p)
 		cout << "Binding failed."<< endl;
 
 	listen(s_socket, 10);
-
+	int i = 0;
+	int com_socket[1000];
 	while(true)
 	{
 		struct sockaddr_in client_add;
 		socklen_t len = sizeof(client_add);
-		
-		int *com_socket = new int[1]; 
-		*com_socket = accept(s_socket, (struct sockaddr *)&client_add, &len);
+		 
+		com_socket[i] = accept(s_socket, (struct sockaddr *)&client_add, &len);
 
-		if(com_socket < 0)
+		if(com_socket[i] < 0)
 			cout << "Error while accept!" << endl;
 
 		pthread_t request_handler;
-		pthread_create(&request_handler, NULL, fileshare, com_socket);
+		pthread_create(&request_handler, NULL, fileshare, &com_socket[i]);
+		i = (i + 1) % 1000;
 	}
 
 	close(s_socket);
-	pthread_exit(NULL);
 }
 
 void get_tracker_info(string &ip, int &port)
@@ -147,7 +154,8 @@ void login(string cmd)
 	//login username password
 	char msg[512];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 512);
 	recv(tracker, msg, sizeof(msg), 0);
 	cout << msg << endl;
 }
@@ -163,7 +171,8 @@ void create_user(string cmd, string ip, int port)
 	strcat(msg, ip.c_str());
 	strcat(msg, " ");
 	strcat(msg, temp);
-	send(tracker, msg, sizeof(msg), 0);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 512);
 	recv(tracker, msg, sizeof(msg), 0);
 	cout << msg << endl;
 }
@@ -172,7 +181,8 @@ void create_group(string cmd)
 {
 	char msg[512];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 512);
 	recv(tracker, msg, sizeof(msg), 0);
 	cout << msg << endl;
 }
@@ -181,7 +191,8 @@ void join_group(string cmd)
 {
 	char msg[512];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 512);
 	recv(tracker, msg, sizeof(msg), 0);
 	cout << msg << endl;
 }
@@ -190,103 +201,265 @@ void leave_group(string cmd)
 {
 	char msg[512];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 512);
 	recv(tracker, msg, sizeof(msg), 0);
 	cout << msg << endl;
 }
 
 void list_requests(string cmd)
 {
-	char msg[512];
-	int size;
+	char msg[2048];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
-	recv(tracker, &size, sizeof(int), 0);
-	if(size)
-	{
-		cout << "List of pending requestes:" << endl;
-		while(size-- > 1)
-		{
-			recv(tracker, msg, sizeof(msg), 0);
-			cout << msg << endl;
-		}
-		recv(tracker, msg, sizeof(msg), 0);
-		cout << msg << endl;
-	}
-	else
-	{
-		recv(tracker, msg, sizeof(msg), 0);
-		cout << msg << endl;
-	}
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 2048);
+	recv(tracker, msg, sizeof(msg), 0);
+	cout << msg << endl;
 }
 
 void accept_request(string cmd)
 {
 	char msg[512];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 512);
 	recv(tracker, msg, sizeof(msg), 0);
 	cout << msg << endl;
 }
 
 void list_groups(string cmd)
 {
-	char msg[512];
-	int size;
+	char msg[1024];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
-	recv(tracker, &size, sizeof(int), 0);
-	if(size)
-	{
-		cout << "List of groups:" << endl;
-		while(size-- > 1)
-		{
-			recv(tracker, msg, sizeof(msg), 0);
-			cout << msg << endl;
-		}
-		recv(tracker, msg, sizeof(msg), 0);
-		cout << msg << endl;
-	}
-	else
-	{
-		recv(tracker, msg, sizeof(msg), 0);
-		cout << msg << endl;
-	}
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 1024);
+	recv(tracker, msg, sizeof(msg), 0);
+	cout << msg << endl;
 }
 
 void list_files(string cmd)
 {
-	char msg[512];
+	char msg[51200];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 51200);
 	recv(tracker, msg, sizeof(msg), 0);
 	cout << msg << endl;
 }
 
 void upload_file(string cmd)
 {
-	char msg[512];
+	//upload_file <filepath> <groupId> <hash> <size>
+	stringstream ss(cmd);
+	string fpath;
+	ss >> fpath >> fpath;
+	FILE *fp = fopen(fpath.c_str(), "rb+");
+	if(fp == NULL)
+	{
+		cout << "Invalid file path!" << endl;
+		return;
+	}
+	const unsigned char str[] = "Original String";
+  	unsigned char hash[SHA_DIGEST_LENGTH]; // == 20
+
+  	SHA1(str, sizeof(str) - 1, hash);
+
+	fseek(fp, 0, SEEK_END);
+	long long size = ftell(fp);
+	fclose(fp);
+	char temp[32];
+	sprintf(temp, "%lld", size);
+	char msg[51200];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
-	int ln = recv(tracker, msg, sizeof(msg), 0);
+	strcat(msg, " ");
+	strcat(msg, fpath.c_str());
+	strcat(msg, "jfjdhajg738sdgjhjafsfkj837rjgjgfd73rjgjhfgjasjdgfjg387rufjdgfhgdajsgfajfd3827rfgjgdsa73");
+	strcat(msg, " ");
+	strcat(msg, temp);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 51200);
+	recv(tracker, msg, sizeof(msg), 0);
+	if(!strcmp(msg,"File successfully uploaded."))
+	{
+		long long chunks = size / 51200;
+		string list;
+		int i = 0;
+		list = to_string(i++);
+		while(i <= chunks)
+		{
+			list = list + " " + to_string(i);
+			i++;
+		}
+		files[fpath] = list;
+	}
 	cout << msg << endl;
+}
+
+void *fenner(void *rudoff)
+{
+	struct trdarg *richard = (struct trdarg *) rudoff;
+	char msg[256];
+	char chnk[51200];
+	int socket = connection_establish(richard->ip, richard->port);
+	strcpy(msg, "get_chunk_details ");
+	strcat(msg, richard->path.c_str());
+	send(socket, msg, strlen(msg), 0);
+	bzero(chnk, 51200);
+	recv(socket, chnk, sizeof(chnk), 0);
+
+	string temp = chnk;
+	stringstream ss(temp);
+	int c;
+	while(ss >> c)
+		richard->chunks.push_back(c);
+}
+
+bool cmp(struct trdarg *ow1, struct trdarg *ow2)
+{
+	if(ow1->chunks.size() > ow2->chunks.size())
+		return false;
+	else
+		return true;
+}
+
+void *fc_download(void *rudoff)
+{
+	struct trdarg *richard = (struct trdarg *) rudoff;
+	FILE *fp = fopen(richard->dpath.c_str(), "rb+");
+	if(fp == NULL)
+	{
+		cout << "Invalid destination path!" << endl; 
+	}
+	int st = richard->cc * 51200;
+	fseek(fp, st, SEEK_SET);
+	int socket = connection_establish(richard->ip, richard->port);
+	if(socket == -1)
+	{
+		cout << "Error in connection" << endl;
+		return NULL;
+	}
+	char msg[512];
+	strcpy(msg, "download ");
+	strcat(msg, richard->path.c_str());
+	send(socket, &richard->cc, sizeof(int), 0);
+	char buf[51200];
+	bzero(buf, 51200);
+	int ln = recv(socket, buf, sizeof(buf), 0);
+	fwrite(buf, sizeof(char), ln, fp);
+	cout << richard->cc << " successfully downloaded from " << richard->name << endl;
+	fclose(fp);
 }
 
 void download_file(string cmd)
 {
-	char msg[512];
+	char msg[51200];
+	int filesize;
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
-	int ln = recv(tracker, msg, sizeof(msg), 0);
-	cout << msg << endl;
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 51200);
+	recv(tracker, msg, sizeof(msg), 0);
+	vector<string> o;
+	vector<struct trdarg*> owners;
+	string h;
+
+	if(strstr(msg, "/"))
+	{
+		filesize = atoi(strtok(msg,"/"));
+		h = strtok(NULL,"/");
+		bzero(msg, 51200);	
+		recv(tracker, msg, sizeof(msg), 0);
+		char *cptr;
+		cptr = strtok(msg, "\n");
+		while(cptr)
+		{
+			string temp = cptr;
+			o.push_back(temp);
+			cptr = strtok(NULL, "\n");
+		}
+	}
+	else
+	{
+		cout << msg << endl;
+		return;
+	}
+
+	cout << "Downloading file..." << endl;
+	char *fname = strtok((char *)cmd.c_str(), " ");
+	fname = strtok(NULL, " ");
+	fname = strtok(NULL, " ");
+	fname = strtok(NULL, " ");
+	for(auto i : o)
+	{
+		struct trdarg *t = new struct trdarg;
+		stringstream ss(i);
+ 		ss >> t->name;
+ 		ss >> t->port;
+ 		ss >> t->ip;
+ 		ss >> t->path;
+ 		t->dpath = fname;
+ 		t->hash = h;
+ 		owners.push_back(t); 		
+	}
+
+	for(int i = 0; i < owners.size(); i++)
+	{
+		pthread_t steven;
+		pthread_create(&steven, NULL, fenner, owners[i]);
+		pthread_join(steven, NULL);
+	}
+
+	sort(owners.begin(), owners.end(), cmp);
+
+	FILE *fp = fopen(fname, "wb");
+	int temp = filesize;
+	int ctotal = filesize / 51200;
+	char ch[2];
+	strcpy(ch, "0");
+	while(temp > 0)
+	{
+		fwrite(ch, sizeof(char), 1, fp);
+		temp--;
+	}
+	fclose(fp);
+
+	vector<int> df(ctotal+1, 0);
+	for(int i = 0; i <= ctotal; i++)
+	{ 
+		int flag = 1;
+		if(!df[i])
+		{	
+			vector<pthread_t> thrd;
+			for(int j = 0; j < owners.size(); j++)
+			{
+				if(owners[j]->chunks.size() > i)
+				{
+					if(!df[owners[j]->chunks[i]])
+					{
+						flag = 0;
+						df[owners[j]->chunks[i]] = 1;
+						owners[j]->cc = owners[j]->chunks[i];
+						pthread_t richard;
+						pthread_create(&richard,NULL ,fc_download, owners[j]);
+						thrd.push_back(richard);
+					}
+				}
+			}
+			for(auto i : thrd)
+				pthread_join(i, NULL);
+		}
+		if(flag)
+			break;
+	}
+
 }
 
 void logout(string cmd)
 {
 	char msg[512];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
-	int ln = recv(tracker, msg, sizeof(msg), 0);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 512);
+	recv(tracker, msg, sizeof(msg), 0);
 	cout << msg << endl;
 }
 
@@ -294,8 +467,9 @@ void show_downloads(string cmd)
 {
 	char msg[512];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
-	int ln = recv(tracker, msg, sizeof(msg), 0);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 512);
+	recv(tracker, msg, sizeof(msg), 0);
 	cout << msg << endl;
 }
 
@@ -303,8 +477,9 @@ void stop_share(string cmd)
 {
 	char msg[512];
 	strcpy(msg, cmd.c_str());
-	send(tracker, msg, sizeof(msg), 0);
-	int ln = recv(tracker, msg, sizeof(msg), 0);
+	send(tracker, msg, strlen(msg), 0);
+	bzero(msg, 512);
+	recv(tracker, msg, sizeof(msg), 0);
 	cout << msg << endl;
 }
 
@@ -321,21 +496,27 @@ int main(int argc, char const *argv[])
 	ipp = strtok((char *)argv[1], ":");
 	string ip(ipp);
 	int port = atoi(strtok(NULL, ":"));
-	// pthread_t s;
-	// pthread_create(&s, NULL, server, (void *) &port);
+	pthread_t s;
+	pthread_create(&s, NULL, server, (void *) &port);
  	string commmand, tip;
  	int tport;
  	get_tracker_info(tip, tport);
  	tracker = connection_establish(tip, tport);
- 	cout << "successfully connected with tracker." << endl;
+ 	if(tracker > 0)
+ 	{
+ 		cout << "successfully connected with tracker!" << endl;
+ 	}
+
  	while(true)
  	{	
  		cout << "Enter commmand:";
  		getline(cin, commmand);
+ 		if(commmand.size() == 0)
+ 			continue;
+
  		stringstream ss(commmand);
  		vector<string> arg;
  		string temp;
- 		
  		while(ss >> temp)
  			arg.push_back(temp);
 
@@ -343,82 +524,39 @@ int main(int argc, char const *argv[])
 			create_user(commmand, ip, port);
 		else if(arg[0] == "login")
 			login(commmand);
-		else if(arg[0] == "create_group​")
+		else if(arg[0] == "create_group")
 			create_group(commmand);
 		else if(arg[0] == "join_group")
 			join_group(commmand);
 		else if(arg[0] == "leave_group")
-		{	
-			if(arg.size() != 2)
-				cout << "usage: leave_group​ <group_id>" << endl;
-			else
-				leave_group(commmand);
-		}
+			leave_group(commmand);
 		else if(arg[0] == "list_requests")
-		{	
-			if(arg.size() != 2)
-				cout << "usage: list_requests <group_id>" << endl;
-			else
-				list_requests(commmand);
-		}
+			list_requests(commmand);
 		else if(arg[0] == "accept_request")
-		{	
-			if(arg.size() != 3)
-				cout << "usage: accept_request​ <group_id> <user_id>" << endl;
-			else
-				accept_request(commmand);
-		}
+			accept_request(commmand);
 		else if(arg[0] == "list_groups")
-		{	
-			if(arg.size() != 1)
-				cout << "usage: list_groups" << endl;
-			else
-				list_groups(commmand);
-		}
+			list_groups(commmand);
 		else if(arg[0] == "list_files")
-		{	
-			if(arg.size() != 2)
-				cout << "usage: list_files​ <group_id>" << endl;
-			else
-				list_files(commmand);
-		}
+			list_files(commmand);
 		else if(arg[0] == "upload_file")
-		{	
-			if(arg.size() != 3)
-				cout << "usage: upload_file​ <file_path> <group_id>" << endl;
-			else
-				upload_file(commmand);
-		}
+			upload_file(commmand);
 		else if(arg[0] == "download_file")
-		{	
-			if(arg.size() != 4)
-				cout << "usage: download_file​ <group_id> <file_name> <destination_path>" << endl;
-			else
-				download_file(commmand);
-		}
+			download_file(commmand);
 		else if(arg[0] == "logout")
-		{	
-			if(arg.size() != 1)
-				cout << "usage: logout" << endl;
-			else
-				logout(commmand);
-		}
+			logout(commmand);
 		else if(arg[0] == "show_downloads")
-		{	
-			if(arg.size() != 1)
-				cout << "usage: Show_downloads" << endl;
-			else
-				show_downloads(commmand);
-		}
+			show_downloads(commmand);
 		else if(arg[0] == "stop_share")
-		{	
-			if(arg.size() != 3)
-				cout << "usage: stop_share <group_id> <file_name>" << endl;
-			else
-				stop_share(commmand);
-		}
+			stop_share(commmand);
 		else
-			cout << "Invalid commmand!" << endl;
+		{
+			char msg[512];
+			strcpy(msg, commmand.c_str());
+			send(tracker, msg, strlen(msg), 0);
+			bzero(msg, 512);
+			recv(tracker, msg, sizeof(msg), 0);
+			cout << msg << endl;
+		}
  	}
 
 	pthread_exit(NULL);

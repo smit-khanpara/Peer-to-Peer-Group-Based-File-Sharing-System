@@ -63,7 +63,7 @@ void create_user(vector<string> arg, int socket)
 		return;
 	}
 
-	struct userInfo *new_user = (struct userInfo *) malloc(sizeof(struct userInfo));
+	struct userInfo *new_user = new struct userInfo;
 	new_user->passwd = arg[2];
 	new_user->ip = arg[3];
 	new_user->port = arg[4];
@@ -124,7 +124,7 @@ void create_group(vector<string> arg, string cu, int socket)
 	}
 	else
 	{
-		struct groupInfo *new_group = (struct groupInfo *) malloc(sizeof(struct groupInfo));
+		struct groupInfo *new_group = new struct groupInfo[1];
 		new_group->group_id = arg[1];
 		new_group->owner = cu;
 		new_group->members.push_back(cu);
@@ -187,48 +187,56 @@ void leave_group(vector<string> arg, string cu, int socket)
 		for(int i=0; i<temp->members.size(); i++) if(temp->members[i] == cu) { flag = i; break; }
 		if(flag >= 0)
 		{
-			for(auto f : users[cu]->fl)
+			if(cu != temp->owner)
 			{
-				struct fileInfo *fi = files[filemap[f]];
-				if(fi->owners.size() == 1)
+				for(auto f : users[cu]->fl)
 				{
-					filemap.erase(f);
-					files.erase(filemap[f]);
-					free(fi);	
-				}
-				else
-				{
-					for(int i = 0; i < fi->owners.size(); i++)
+					struct fileInfo *fi = files[filemap[f]];
+					if(fi->owners.size() == 1)
 					{
-						if(fi->owners[i] == cu && fi->groups[i] == arg[1])
+						filemap.erase(f);
+						files.erase(filemap[f]);
+						free(fi);	
+					}
+					else
+					{
+						for(int i = 0; i < fi->owners.size(); i++)
 						{
-							fi->owners.erase(fi->owners.begin() + i);
-							fi->groups.erase(fi->groups.begin() + i);
-							fi->paths.erase(fi->paths.begin() + i);
-
-							int cnt = 0;
-							for(int j = 0; j < fi->owners.size(); j++)
+							if(fi->owners[i] == cu && fi->groups[i] == arg[1])
 							{
-								int k;
-								for(k = fi->paths[j].size() - 1; k >= 0; i--)  if(fi->paths[j][k] == '/')  break;
-								string temp = fi->paths[j].substr(k+1);
-								if(temp == f)
+								fi->owners.erase(fi->owners.begin() + i);
+								fi->groups.erase(fi->groups.begin() + i);
+								fi->paths.erase(fi->paths.begin() + i);
+
+								int cnt = 0;
+								for(int j = 0; j < fi->owners.size(); j++)
 								{
-									cnt = 1;
-									break;
-								}			
-							}
-							if(!cnt)
-								filemap.erase(f);
-						}	
+									int k;
+									for(k = fi->paths[j].size() - 1; k >= 0; i--)  if(fi->paths[j][k] == '/')  break;
+									string temp = fi->paths[j].substr(k+1);
+									if(temp == f)
+									{
+										cnt = 1;
+										break;
+									}			
+								}
+								if(!cnt)
+									filemap.erase(f);
+							}	
+						}
 					}
 				}
-			}
 
-			temp->members.erase(temp->members.begin() + flag);
-			strcpy(msg, "You have leaved group ");
-			strcpy(msg, arg[1].c_str());
-			send(socket, msg, strlen(msg), 0);
+				temp->members.erase(temp->members.begin() + flag);
+				strcpy(msg, "You have leaved group ");
+				strcat(msg, arg[1].c_str());
+				send(socket, msg, strlen(msg), 0);
+			}
+			else
+			{
+				strcpy(msg, "Group owner cann't leave group!");
+				send(socket, msg, strlen(msg), 0);
+			}
 		}
 		else
 		{
@@ -245,7 +253,7 @@ void leave_group(vector<string> arg, string cu, int socket)
 
 void list_requests(vector<string> arg, string cu, int socket)
 {
-	char msg[512];
+	char msg[2048];
 	int size = 0;
 	if(groups.find(arg[1]) != groups.end())
 	{
@@ -253,28 +261,28 @@ void list_requests(vector<string> arg, string cu, int socket)
 		if(temp->owner == cu)
 		{
 			size = temp->join_requests.size();
-			send(socket, &size, sizeof(int), 0);
+			strcpy(msg, "Join request list:");
 			for(int i=0; i<size; i++)
 			{
-				strcpy(msg, temp->join_requests[i].c_str());
-				send(socket, msg, strlen(msg), 0);
+				strcat(msg,"\n");
+				strcat(msg, temp->join_requests[i].c_str());
 			}
 			if(size == 0)
 			{
 				strcpy(msg, "There is no pending requests.");
 				send(socket, msg, strlen(msg), 0);
 			}
+			else
+				send(socket, msg, strlen(msg), 0);
 		}
 		else
 		{
-			send(socket, &size, sizeof(int), 0);
 			strcpy(msg, "Only group owner can list requests.");
 			send(socket, msg, strlen(msg), 0);
 		}
 	}
 	else
 	{
-		send(socket, &size, sizeof(int), 0);
 		strcpy(msg, "Group doesn't exist!");
 		send(socket, msg, strlen(msg), 0);
 	}
@@ -321,20 +329,23 @@ void accept_request(vector<string> arg, string cu, int socket)
 
 void list_groups(int socket)
 {
-	char msg[512];
+	char msg[1024];
 	int size = 0;
 	size = groups.size();
-	send(socket, &size, sizeof(int), 0);
+	bzero(msg, 1024);
+	strcpy(msg, "Group list:");
 	for(auto i : groups)
 	{
-		strcpy(msg, i.first.c_str());
-		send(socket, msg, strlen(msg), 0);
+		strcat(msg, "\n");
+		strcat(msg, i.first.c_str());
 	}
 	if(size == 0)
 	{
 		strcpy(msg, "No group exist!");
 		send(socket, msg, strlen(msg), 0);
 	}
+	else
+		send(socket, msg, strlen(msg), 0);
 }
 
 int logout(string cu, int socket)
@@ -355,7 +366,7 @@ void upload_file(vector<string> arg, string cu, int socket)
 		int flag = 0;
 		struct userInfo *u = users[cu];
 		for(int i=0; i<u->gr.size(); i++)  if(arg[2] == u->gr[i]) {  flag = 1; break; }
-
+		
 		if(flag)
 		{
 			int i;
@@ -363,12 +374,13 @@ void upload_file(vector<string> arg, string cu, int socket)
 			string temp = arg[1].substr(i+1);
 			if(files.find(arg[3]) == files.end())
 			{
-				struct fileInfo *f = (struct fileInfo*) malloc(sizeof(struct fileInfo));
-				f->size = arg[4];
-				f->owners.push_back(cu);
-				f->groups.push_back(arg[2]);
-				f->paths.push_back(arg[1]);
-				files[arg[3]] = f;
+				struct fileInfo *ff = new fileInfo;
+			
+				ff->size = arg[4];
+				ff->owners.push_back(cu);
+				ff->groups.push_back(arg[2]);
+				ff->paths.push_back(arg[1]);
+				files[arg[3]] = ff;
 				users[cu]->fl.push_back(temp);
 				filemap[temp] = arg[3];
 				strcpy(msg, "File successfully uploaded.");
@@ -423,38 +435,39 @@ void upload_file(vector<string> arg, string cu, int socket)
 
 void list_files(vector<string> arg, int socket)
 {
-	char msg[512];
+	char msg[51200];
+	char temp[512];
 	if(groups.find(arg[1]) != groups.end())
 	{
 		if(filemap.size())
 		{
 			int cnt = 0;
+			strcpy(msg, "File list:");
 			for(auto i : filemap)
 			{
 				int flag = 0;
 				struct fileInfo *f = files[i.second];
-				strcpy(msg, i.first.c_str());
-				strcat(msg, " ");
+				strcpy(temp, i.first.c_str());
+				strcat(temp, " ");
+
 				for(int j = 0; j < f->groups.size(); j++)
 				{
-					if(f->groups[j] == arg[1])
+					if(f->groups[j] == arg[1] && login_status[f->owners[j]])
 					{
-						strcat(msg, f->owners[j].c_str());
-						strcat(msg, " ");
+						strcat(temp, f->owners[j].c_str());
+						strcat(temp, " ");
 						flag++;
 					}
 				}
 				if(flag)
 				{
+					strcat(msg,"\n");
+					strcat(msg,temp);
 					cnt++;
-					send(socket, msg, strlen(msg), 0);
 				}
 			}
 			if(cnt)
-			{
-				strcpy(msg, "complete");
 				send(socket, msg, strlen(msg), 0);
-			}
 			else
 			{
 				strcpy(msg, "No files exist!");
@@ -477,7 +490,7 @@ void list_files(vector<string> arg, int socket)
 void download_file(vector<string> arg, string cu, int socket)
 {
 	// download_file​ <group_id> <file_name> <destination_path>
-	char msg[512];
+	char msg[51200];
 	if(groups.find(arg[1]) != groups.end())
 	{
 		if(filemap.find(arg[2]) != filemap.end())
@@ -490,19 +503,19 @@ void download_file(vector<string> arg, string cu, int socket)
 			{
 				string temp;
 				struct fileInfo *f = files[filemap[arg[2]]];
-				temp = f->size + "/";
+				temp = f->size + "/" + filemap[arg[2]];
 				strcpy(msg, temp.c_str());
 				send(socket, msg, strlen(msg), 0);
+				sleep(0.1);
+				strcpy(msg, "");
 				for(int i = 0; i < f->owners.size(); i++)
 				{
-					if(arg[1] == f->groups[i])
+					if(arg[1] == f->groups[i] && login_status[f->owners[i]])
 					{
-						temp = f->owners[i] + "/" + users[f->owners[i]]->port + "/" + users[f->owners[i]]->ip + "/" + f->paths[i];
-						strcpy(msg, temp.c_str());
-						send(socket, msg, strlen(msg), 0);
+						temp = f->owners[i] + " " + users[f->owners[i]]->port + " " + users[f->owners[i]]->ip + " " + f->paths[i] + "\n";
+						strcat(msg, temp.c_str());
 					}
 				}
-				strcpy(msg, "done");
 				send(socket, msg, strlen(msg), 0);
 			}
 			else
@@ -522,19 +535,18 @@ void download_file(vector<string> arg, string cu, int socket)
 		strcpy(msg, "Group doesn't exist!");
 		send(socket, msg, strlen(msg), 0);
 	}
-
 }
 
 void *request_handler(void *com_socket)
 {
 	int socket = *(int *) com_socket;
-	char msg[512];
 	int logged = 0;
 	string curr_user;
+	char msg[51200];
 	while(true)
 	{
-		char msg[512];
-		recv(socket, msg, strlen(msg), 0);
+		bzero(msg, 51200);
+		recv(socket, msg, sizeof(msg), 0);
 		string commmand(msg);
 		stringstream ss(commmand);
  		vector<string> arg;
@@ -572,7 +584,7 @@ void *request_handler(void *com_socket)
 		}
 		else if(logged)
 		{
-			if(arg[0] == "create_group​")
+			if(arg[0] == "create_group")
 			{	
 				if(arg.size() != 2)
 				{
@@ -687,7 +699,10 @@ void *request_handler(void *com_socket)
 			// 		stop_share(commmand);
 			// }
 			else
-				cout << "Invalid commmand!" << endl;
+			{
+				strcpy(msg, "Invalid commmand!");
+				send(socket, msg, strlen(msg), 0);
+			}
 		}
 		else
 		{
@@ -749,7 +764,6 @@ void *server(void *p)
 	}
 
 	close(s_socket);
-	pthread_exit((void *) 0);
 }
 
 
@@ -774,7 +788,6 @@ int main(int argc, char const *argv[])
 
 	pthread_t s;
 	pthread_create(&s, NULL, server, (void *) &port);
-	sleep(1);
 	if(status)
 		return 0;
 	string com;
